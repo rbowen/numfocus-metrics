@@ -1,0 +1,18 @@
+{
+  "projects": {
+    "pandas": { "repo": "pandas-dev/pandas" },
+    "NumPy": { "repo": "numpy/numpy" },
+    "SciPy": { "repo": "scipy/scipy" },
+    "Blosc": { "repo": "Blosc/python-blosc2" },
+    "Spyder": { "repo": "spyder-ide/spyder" }
+  },
+  "companies": {
+    "Acme Corp": [
+      { "name": "Alice Example", "github": "alice-gh" },
+      { "name": "Bob Sample", "github": "bobsample" }
+    ],
+    "Widgets Inc": [
+      { "name": "Carol Demo", "github": "caroldemo" }
+    ]
+  }
+}

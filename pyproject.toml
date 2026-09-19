@@ -1,0 +1,12 @@
+[project]
+name = "numfocus-dashboard"
+version = "0.1.0"
+description = "NumFOCUS Sustaining Open Source Series — contribution tracker dashboard"
+requires-python = ">=3.11"
+dependencies = [
+    "requests>=2.31",
+]
+
+[project.scripts]
+numfocus-collect = "collect:main"
+numfocus-dashboard = "generate_dashboard:main"

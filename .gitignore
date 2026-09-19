@@ -1,0 +1,9 @@
+.cache/
+.venv/
+data.json
+dashboard/
+participants.json
+__pycache__/
+*.pyc
+uv.lock
+*.csv
