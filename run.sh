@@ -1,16 +1,16 @@
-#!/bin/zsh
+#!/bin/sh
 # Collect data from GitHub and generate dashboard
 # Requires: GITHUB_TOKEN env var
 cd "$(dirname "$0")"
 
 # Ensure GITHUB_TOKEN is set
 if [[ -z "$GITHUB_TOKEN" ]]; then
-    # Try sourcing zshrc for the token
-    [[ -f ~/.zshrc ]] && source ~/.zshrc 2>/dev/null
+    # Try sourcing bashrc for the token
+    [[ -f ~/.bashrc ]] && source ~/.bashrc 2>/dev/null
 fi
 
 if [[ -z "$GITHUB_TOKEN" ]]; then
-    echo "❌ GITHUB_TOKEN not set. Export it or add to ~/.zshrc"
+    echo "❌ GITHUB_TOKEN not set. Export it or add to ~/.bashrc"
     exit 1
 fi
 
