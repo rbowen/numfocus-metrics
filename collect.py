@@ -30,7 +30,11 @@ HEADERS = {
     "Accept": "application/vnd.github+json",
 }
 API = "https://api.github.com"
-SERIES_START = "2026-09-14T00:00:00Z"
+# Collection start. The cohort's first office hours were 2026-09-14, but some
+# participants began contributing in mid/late August (per Bloomberg, some
+# started ~Aug 20 and Ryan Lin had two pandas PRs merged Aug 29-30). Pulled
+# back to Aug 15 to capture that early activity.
+SERIES_START = "2026-08-15T00:00:00Z"
 
 BASE_DIR = Path(__file__).parent
 PARTICIPANTS_FILE = BASE_DIR / "participants.json"
