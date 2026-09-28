@@ -456,12 +456,14 @@ def _clean_pr_title(title):
     return t.strip()
 
 
-def company_markdown_report(D, co_name, items):
-    """Plain-text markdown report for a single company (for email/Slack).
+def company_slack_report(D, co_name, items):
+    """Plain-text report formatted to survive a PASTE into Slack.
 
-    Includes top-level numbers, activity by project, participant leaderboard,
-    and open/merged PR lists. Comments and reviews are intentionally omitted.
-    No link back to the dashboard (private resource for now).
+    Slack does not render pasted markdown, so: headings are ALL-CAPS lines,
+    bullets use the literal '•' char, the leaderboard is an aligned monospace
+    table wrapped in a ``` code block (columns line up in Slack's mono font),
+    and PR lines use bare URLs (Slack auto-links them) kept OUTSIDE the code
+    block. No markdown tables, no *bold*, no [text](url), no <url|text>.
     """
     r2p = {v["repo"]:k for k,v in D["projects"].items()}
     parts = D["participants"]
@@ -476,57 +478,72 @@ def company_markdown_report(D, co_name, items):
     collected = D.get("collected_at","")[:10]
 
     L = []
-    L.append(f"# {co_name} — NumFOCUS Sustaining Open Source Series")
-    if collected: L.append(f"_Activity as of {collected}_")
+    hdr = f"{co_name.upper()} — NUMFOCUS SUSTAINING OPEN SOURCE SERIES"
+    L.append(hdr)
+    if collected: L.append(f"Activity as of {collected}")
     L.append("")
-    L.append("## Summary")
-    L.append(f"- Total activities: {n}")
-    L.append(f"- PRs: {len(prs_all)} ({len(merged)} merged, {len(open_prs)} open)")
-    L.append(f"- Commits: {commits}")
-    L.append(f"- Issues: {issues}")
-    L.append(f"- Active participants: {active}")
+    L.append("SUMMARY")
+    L.append(f"• Total activities: {n}")
+    L.append(f"• PRs: {len(prs_all)} ({len(merged)} merged · {len(open_prs)} open)")
+    L.append(f"• Commits: {commits}")
+    L.append(f"• Issues: {issues}")
+    L.append(f"• Active participants: {active}")
     L.append("")
 
-    # Activity by project
     by_proj = Counter(r2p.get(a.get("repo",""), a.get("repo","")) for a in items)
-    L.append("## Activity by Project")
+    L.append("ACTIVITY BY PROJECT")
     if by_proj:
         for p,c in by_proj.most_common():
-            L.append(f"- {p}: {c}")
+            L.append(f"• {p}: {c}")
     else:
-        L.append("- (none yet)")
+        L.append("• (none yet)")
     L.append("")
 
-    # Leaderboard (PRs / Merged / Commits / Issues / Total; comments+reviews omitted)
-    stats = defaultdict(lambda: {"prs":0,"merged":0,"commits":0,"issues":0,"total":0})
+    # Leaderboard stats. Total = PRs + Commits + Issues + Comments + Reviews.
+    stats = defaultdict(lambda: {"prs":0,"merged":0,"commits":0,"issues":0,"comments":0,"reviews":0,"total":0})
     for a in items:
         gh = a.get("author","").lower(); t = a["type"]
         stats[gh]["total"] += 1
         if t=="pr": stats[gh]["prs"]+=1; stats[gh]["merged"]+=int(bool(a.get("merged")))
         elif t=="commit": stats[gh]["commits"]+=1
         elif t=="issue": stats[gh]["issues"]+=1
-    L.append("## Participant Leaderboard")
+        elif t=="comment": stats[gh]["comments"]+=1
+        elif t=="review": stats[gh]["reviews"]+=1
+
+    L.append("PARTICIPANT LEADERBOARD")
     if stats:
-        L.append("| # | Person | PRs | Merged | Commits | Issues | Total |")
-        L.append("|---|--------|-----|--------|---------|--------|-------|")
-        for i,(gh,s) in enumerate(sorted(stats.items(), key=lambda x:-x[1]["total"]),1):
+        ranked = sorted(stats.items(), key=lambda x:-x[1]["total"])
+        headers = ["#","Person","PRs","Merged","Commits","Issues","Comments","Reviews","Total"]
+        table_rows = []
+        for i,(gh,s) in enumerate(ranked,1):
             nm = parts.get(gh,{}).get("name",gh)
-            L.append(f"| {i} | {nm} | {s['prs']} | {s['merged']} | {s['commits']} | {s['issues']} | {s['total']} |")
+            table_rows.append([str(i), nm, str(s["prs"]), str(s["merged"]), str(s["commits"]),
+                               str(s["issues"]), str(s["comments"]), str(s["reviews"]), str(s["total"])])
+        # Column widths: person left-aligned, numeric columns right-aligned.
+        widths = [max(len(headers[c]), *(len(r[c]) for r in table_rows)) for c in range(len(headers))]
+        def _fmt_row(cells):
+            out = []
+            for c,val in enumerate(cells):
+                out.append(val.ljust(widths[c]) if c==1 else val.rjust(widths[c]))
+            return "  ".join(out)
+        L.append(_fmt_row(headers))
+        L.append("  ".join("-"*widths[c] for c in range(len(headers))))
+        for r in table_rows:
+            L.append(_fmt_row(r))
     else:
         L.append("(no activity yet)")
     L.append("")
 
-    # PR lists — merged and open, kept separate
     def _fmt_pr(a):
         proj = r2p.get(a.get("repo",""), a.get("repo",""))
         who = a.get("person_name") or parts.get(a.get("author","").lower(),{}).get("name", a.get("author",""))
-        return f"- [{proj}] {_clean_pr_title(a.get('title',''))} — {who} ({a.get('url','')})"
+        return f"• [{proj}] {_clean_pr_title(a.get('title',''))} — {who}  {a.get('url','')}"
 
-    L.append(f"## Merged PRs ({len(merged)})")
-    L.extend([_fmt_pr(a) for a in sorted(merged, key=lambda x:x.get("created_at",""), reverse=True)] or ["- (none yet)"])
+    L.append(f"MERGED PRs ({len(merged)})")
+    L.extend([_fmt_pr(a) for a in sorted(merged, key=lambda x:x.get("created_at",""), reverse=True)] or ["• (none yet)"])
     L.append("")
-    L.append(f"## Open PRs ({len(open_prs)})")
-    L.extend([_fmt_pr(a) for a in sorted(open_prs, key=lambda x:x.get("created_at",""), reverse=True)] or ["- (none yet)"])
+    L.append(f"OPEN PRs ({len(open_prs)})")
+    L.extend([_fmt_pr(a) for a in sorted(open_prs, key=lambda x:x.get("created_at",""), reverse=True)] or ["• (none yet)"])
     L.append("")
     return "\n".join(L)
 
@@ -582,8 +599,9 @@ def gen_company(D, co_name):
             + f'<div class="section"><h2>Activity Feed</h2>{activity_table(items)}</div>'
             + f'<div class="section"><h2>Team Report (copy-paste)</h2>'
             + '<p style="color:var(--muted);font-size:0.85em;margin-bottom:6px">'
-            + 'Plain-text markdown summary for emailing or pasting to your team.</p>'
-            + f'{copy_box(company_markdown_report(D, co_name, items))}</div>')
+            + 'Formatted to survive a paste into Slack. The leaderboard uses aligned monospace columns — after pasting, '
+            + 'select those lines and apply Slack&rsquo;s code format (⌘+Shift+C) so the columns line up. Bare URLs auto-link.</p>'
+            + f'{copy_box(company_slack_report(D, co_name, items))}</div>')
 
     return page_wrap(f"{co_name} — NumFOCUS Series", f"Activity from {co_name} participants",
                      f"company-{slug}.html", body, proj_names, co_names, D["collected_at"])
