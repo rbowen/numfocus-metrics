@@ -73,6 +73,12 @@ table.t tr:hover{background:rgba(88,166,255,0.05)}
 .bar-label{width:90px;font-size:0.82em;text-align:right;color:var(--muted);overflow:hidden;white-space:nowrap}
 .bar-fill{height:20px;border-radius:3px;min-width:2px;transition:width .3s}
 .bar-val{font-size:0.78em;color:var(--muted);margin-left:4px;min-width:24px}
+.bar-chart-stacked{gap:9px}
+.bar-stack{display:flex;flex-direction:column;gap:2px}
+.bar-stack-label{font-size:0.82em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:baseline}
+.bar-stack-label .bar-val{margin-left:auto;padding-left:8px}
+.bar-track{width:100%}
+.bar-track .bar-fill{width:100%}
 .donut-wrap{display:flex;justify-content:center;align-items:center;gap:16px}
 .donut-legend{font-size:0.82em} .donut-legend div{margin:2px 0;display:flex;align-items:center;gap:5px}
 .swatch{width:10px;height:10px;border-radius:2px;display:inline-block}
@@ -131,17 +137,57 @@ def page_wrap(title, subtitle, active, body, projects, companies, collected_at):
 
 # ─── Chart helpers ───────────────────────────────────────────────────────────
 
-def bar_chart(pairs, max_val=None):
-    if not pairs: return '<p class="empty">No data</p>'
-    if max_val is None: max_val = max(v for _,v in pairs) or 1
+# Fixed employer -> color mapping (kept stable so the legend is meaningful).
+EMPLOYER_COLORS = {"AWS": "#d29922", "Bloomberg": "#58a6ff", "NVIDIA": "#3fb950"}
+EMPLOYER_FALLBACK = "#8b949e"  # --muted, for Unknown/other
+
+
+def category_legend(categories, color_map, default_color=EMPLOYER_FALLBACK):
+    """Inline swatch+label legend for the given categories, in order."""
+    if not categories: return ""
+    swatches = "".join(
+        f'<span style="display:inline-flex;align-items:center;gap:4px;margin-right:12px">'
+        f'<span class="swatch" style="background:{color_map.get(c, default_color)}"></span>'
+        f'{c}</span>'
+        for c in categories)
+    return f'<div style="margin-top:10px;font-size:0.8em;color:var(--muted)">{swatches}</div>'
+
+
+def bar_chart(triples, color_map=None, default_color=EMPLOYER_FALLBACK,
+              show_legend=True, max_val=None):
+    """Left-aligned stacked bar chart (label+count row, full-width bar below).
+
+    triples: list of (label, value, category). For charts with no category
+        distinction, pass category=None (or the label) — colors then cycle
+        through the palette per row and no legend is shown.
+    color_map: category -> hex color. When given, each bar is colored by its
+        category and (unless show_legend=False) a legend of the categories
+        present is appended. When None, colors cycle through COLORS per row.
+    show_legend: set False to suppress the legend even with a color_map (e.g.
+        when the bar labels already are the category names).
+    """
+    if not triples: return '<p class="empty">No data</p>'
+    if max_val is None: max_val = max(v for _,v,_ in triples) or 1
+    seen = []
     rows = []
-    for i,(label,val) in enumerate(pairs):
+    for i,(label,val,cat) in enumerate(triples):
         pct = val/max_val*100 if max_val else 0
-        c = COLORS[i%len(COLORS)]
-        rows.append(f'<div class="bar-row"><span class="bar-label">{label}</span>'
-                    f'<div class="bar-fill" style="width:{max(pct,1):.0f}%;background:{c}"></div>'
-                    f'<span class="bar-val">{val}</span></div>')
-    return f'<div class="bar-chart">{"".join(rows)}</div>'
+        if color_map is not None:
+            color = color_map.get(cat, default_color)
+            label_style = f' style="color:{color};font-weight:600"'
+            if cat not in seen: seen.append(cat)
+        else:
+            color = COLORS[i%len(COLORS)]
+            label_style = ""
+        rows.append(f'<div class="bar-stack">'
+                    f'<div class="bar-stack-label"{label_style}>{label}'
+                    f'<span class="bar-val">{val}</span></div>'
+                    f'<div class="bar-track"><div class="bar-fill" '
+                    f'style="width:{max(pct,1):.0f}%;background:{color}"></div></div></div>')
+    chart = f'<div class="bar-chart bar-chart-stacked">{"".join(rows)}</div>'
+    if color_map is None or not show_legend:
+        return chart
+    return chart + category_legend(seen, color_map, default_color)
 
 
 def donut(pairs, size=130):
@@ -216,16 +262,21 @@ def leaderboard(items, participants):
         elif t=="review": stats[a]["reviews"]+=1
     if not stats: return '<p class="empty">No activity yet.</p>'
     rows = []
+    seen = []
     for i,(gh,s) in enumerate(sorted(stats.items(),key=lambda x:x[1]["total"],reverse=True),1):
         info = participants.get(gh,{})
         nm = info.get("name",gh); co = info.get("company","?")
-        rows.append(f'<tr><td>{i}</td><td>{nm}<span class="co">{co}</span></td>'
+        color = EMPLOYER_COLORS.get(co, EMPLOYER_FALLBACK)
+        if co not in seen: seen.append(co)
+        rows.append(f'<tr><td>{i}</td><td><span style="color:{color};font-weight:600">{nm}</span>'
+                    f'<span class="co">{co}</span></td>'
                     f'<td>{s["prs"]}</td><td>{s["merged"]}</td><td>{s["commits"]}</td>'
                     f'<td>{s["issues"]}</td><td>{s["comments"]}</td><td>{s["reviews"]}</td>'
                     f'<td><strong>{s["total"]}</strong></td></tr>')
     return (f'<table class="t"><thead><tr><th>#</th><th>Person</th><th>PRs</th><th>Merged</th>'
             f'<th>Commits</th><th>Issues</th><th>Comments</th><th>Reviews</th><th>Total</th>'
-            f'</tr></thead><tbody>{"".join(rows)}</tbody></table>')
+            f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
+            + category_legend(seen, EMPLOYER_COLORS, EMPLOYER_FALLBACK))
 
 
 def project_matrix(by_project, project_names):
@@ -333,13 +384,17 @@ def gen_index(D):
     type_d = donut([("PRs",s.get("prs",0)),("Commits",commits),
                     ("Issues",s.get("issues",0)),("Comments",s.get("comments",0)),
                     ("Reviews",s.get("reviews",0))])
-    proj_b = bar_chart([(p,len(D["by_project"].get(p,[]))) for p in proj_names])
-    co_b = bar_chart([(c,len(D["by_company"].get(c,[]))) for c,_ in sorted(D["by_company"].items(),key=lambda x:-len(x[1]))])
+    proj_b = bar_chart([(p, len(D["by_project"].get(p,[])), None) for p in proj_names])
+    co_pairs = sorted(D["by_company"].items(), key=lambda x:-len(x[1]))
+    co_b = bar_chart([(c, len(items), c) for c,items in co_pairs],
+                     color_map=EMPLOYER_COLORS, show_legend=False)
 
     person_totals = Counter()
     for item in act: person_totals[item.get("author","").lower()] += 1
-    top10 = [(D["participants"].get(g,{}).get("name",g),c) for g,c in person_totals.most_common(10)]
-    top10_b = bar_chart(top10)
+    top10 = [(D["participants"].get(g,{}).get("name",g), c,
+              D["participants"].get(g,{}).get("company","Unknown"))
+             for g,c in person_totals.most_common(10)]
+    top10_b = bar_chart(top10, color_map=EMPLOYER_COLORS)
 
     charts = f'''<div class="row">
         <div class="box"><h3>Activity Types</h3>{type_d}</div>
@@ -405,7 +460,7 @@ def gen_company(D, co_name):
     co_by_proj = Counter()
     for item in items: co_by_proj[item.get("repo","")] += 1
     r2p = {v["repo"]:k for k,v in D["projects"].items()}
-    proj_dist = bar_chart([(r2p.get(r,r),c) for r,c in co_by_proj.most_common()])
+    proj_dist = bar_chart([(r2p.get(r,r), c, None) for r,c in co_by_proj.most_common()])
 
     cards = f'''<div class="cards">
         <div class="card"><div class="n">{n}</div><div class="l">Activities</div></div>
