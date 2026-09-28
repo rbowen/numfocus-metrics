@@ -15,7 +15,7 @@ Usage:  uv run --no-project python generate_dashboard.py
 """
 
 import json, sys, shutil
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from pathlib import Path
 from collections import defaultdict, Counter
 
@@ -248,12 +248,42 @@ def project_matrix(by_project, project_names):
             f'<th>Total</th></tr></thead><tbody>{rows}</tbody></table>')
 
 
-def inactive_callout(activity, participants):
-    active = set(a.get("author","").lower() for a in activity)
-    inactive = sorted(participants[g].get("name",g) for g in set(participants)-active if g in participants)
-    if not inactive: return ""
-    return (f'<div class="warn">⚠️ <strong>Inactive this period ({len(inactive)}):</strong> '
-            f'{", ".join(inactive)}</div>')
+def inactive_callout(activity, participants, window_days=7):
+    # "Active" = authored at least one activity in the trailing window_days,
+    # measured back from the current wall-clock time.
+    ref = datetime.now(tz=timezone.utc)
+    cutoff = ref - timedelta(days=window_days)
+
+    def _dt(item):
+        raw = item.get("created_at") or item.get("submitted_at") or ""
+        try:
+            return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            return None
+
+    active = set()
+    for a in activity:
+        d = _dt(a)
+        if d is not None and d >= cutoff:
+            active.add(a.get("author", "").lower())
+
+    inactive_keys = [g for g in set(participants) - active if g in participants]
+    if not inactive_keys:
+        return ""
+
+    # Split by employer.
+    by_co = defaultdict(list)
+    for g in inactive_keys:
+        info = participants[g]
+        by_co[info.get("company", "Unknown")].append(info.get("name", g))
+
+    total = len(inactive_keys)
+    groups = []
+    for co in sorted(by_co, key=lambda c: (-len(by_co[c]), c)):
+        names = ", ".join(sorted(by_co[co]))
+        groups.append(f'<div style="margin-top:6px"><strong>{co} ({len(by_co[co])}):</strong> {names}</div>')
+    return (f'<div class="warn">⚠️ <strong>Inactive (no activity in last {window_days} days) '
+            f'({total}):</strong>{"".join(groups)}</div>')
 
 
 # ─── Page generators ─────────────────────────────────────────────────────────
