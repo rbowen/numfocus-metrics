@@ -91,6 +91,12 @@ table.t tr:hover{background:rgba(88,166,255,0.05)}
 .tl-labels span{flex:1;text-align:center;font-size:.6em;color:var(--muted)}
 footer{text-align:center;color:var(--muted);font-size:.78em;padding:24px 0 8px;border-top:1px solid var(--border);margin-top:32px}
 pre.json{background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:14px;overflow-x:auto;font-size:.83em}
+.report-box{position:relative;margin-top:10px}
+.report-box textarea{width:100%;min-height:340px;background:var(--surface);color:var(--text);border:1px solid var(--border);
+  border-radius:8px;padding:14px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.82em;line-height:1.5;resize:vertical;white-space:pre}
+.copy-btn{position:absolute;top:10px;right:10px;background:var(--accent);color:#000;border:none;border-radius:6px;
+  padding:6px 12px;font-size:.8em;font-weight:600;cursor:pointer}
+.copy-btn:hover{opacity:.85} .copy-btn.copied{background:var(--green)}
 """
 
 
@@ -444,6 +450,106 @@ def gen_project(D, proj_name):
                      f"project-{slug}.html", body, proj_names, co_names, D["collected_at"])
 
 
+def _clean_pr_title(title):
+    t = title or ""
+    if t.startswith("PR: "): t = t[4:]
+    return t.strip()
+
+
+def company_markdown_report(D, co_name, items):
+    """Plain-text markdown report for a single company (for email/Slack).
+
+    Includes top-level numbers, activity by project, participant leaderboard,
+    and open/merged PR lists. Comments and reviews are intentionally omitted.
+    No link back to the dashboard (private resource for now).
+    """
+    r2p = {v["repo"]:k for k,v in D["projects"].items()}
+    parts = D["participants"]
+
+    n = len(items)
+    prs_all = [a for a in items if a["type"]=="pr"]
+    merged = [a for a in prs_all if a.get("merged")]
+    open_prs = [a for a in prs_all if a.get("state")=="open" and not a.get("merged")]
+    commits = sum(1 for a in items if a["type"]=="commit")
+    issues = sum(1 for a in items if a["type"]=="issue")
+    active = len(set(a.get("author","").lower() for a in items))
+    collected = D.get("collected_at","")[:10]
+
+    L = []
+    L.append(f"# {co_name} — NumFOCUS Sustaining Open Source Series")
+    if collected: L.append(f"_Activity as of {collected}_")
+    L.append("")
+    L.append("## Summary")
+    L.append(f"- Total activities: {n}")
+    L.append(f"- PRs: {len(prs_all)} ({len(merged)} merged, {len(open_prs)} open)")
+    L.append(f"- Commits: {commits}")
+    L.append(f"- Issues: {issues}")
+    L.append(f"- Active participants: {active}")
+    L.append("")
+
+    # Activity by project
+    by_proj = Counter(r2p.get(a.get("repo",""), a.get("repo","")) for a in items)
+    L.append("## Activity by Project")
+    if by_proj:
+        for p,c in by_proj.most_common():
+            L.append(f"- {p}: {c}")
+    else:
+        L.append("- (none yet)")
+    L.append("")
+
+    # Leaderboard (PRs / Merged / Commits / Issues / Total; comments+reviews omitted)
+    stats = defaultdict(lambda: {"prs":0,"merged":0,"commits":0,"issues":0,"total":0})
+    for a in items:
+        gh = a.get("author","").lower(); t = a["type"]
+        stats[gh]["total"] += 1
+        if t=="pr": stats[gh]["prs"]+=1; stats[gh]["merged"]+=int(bool(a.get("merged")))
+        elif t=="commit": stats[gh]["commits"]+=1
+        elif t=="issue": stats[gh]["issues"]+=1
+    L.append("## Participant Leaderboard")
+    if stats:
+        L.append("| # | Person | PRs | Merged | Commits | Issues | Total |")
+        L.append("|---|--------|-----|--------|---------|--------|-------|")
+        for i,(gh,s) in enumerate(sorted(stats.items(), key=lambda x:-x[1]["total"]),1):
+            nm = parts.get(gh,{}).get("name",gh)
+            L.append(f"| {i} | {nm} | {s['prs']} | {s['merged']} | {s['commits']} | {s['issues']} | {s['total']} |")
+    else:
+        L.append("(no activity yet)")
+    L.append("")
+
+    # PR lists — merged and open, kept separate
+    def _fmt_pr(a):
+        proj = r2p.get(a.get("repo",""), a.get("repo",""))
+        who = a.get("person_name") or parts.get(a.get("author","").lower(),{}).get("name", a.get("author",""))
+        return f"- [{proj}] {_clean_pr_title(a.get('title',''))} — {who} ({a.get('url','')})"
+
+    L.append(f"## Merged PRs ({len(merged)})")
+    L.extend([_fmt_pr(a) for a in sorted(merged, key=lambda x:x.get("created_at",""), reverse=True)] or ["- (none yet)"])
+    L.append("")
+    L.append(f"## Open PRs ({len(open_prs)})")
+    L.extend([_fmt_pr(a) for a in sorted(open_prs, key=lambda x:x.get("created_at",""), reverse=True)] or ["- (none yet)"])
+    L.append("")
+    return "\n".join(L)
+
+
+def copy_box(markdown_text):
+    """A textarea holding the markdown plus a one-click copy button."""
+    import html as _html
+    escaped = _html.escape(markdown_text)
+    return (
+        '<div class="report-box">'
+        '<button class="copy-btn" onclick="copyReport(this)">Copy</button>'
+        f'<textarea readonly spellcheck="false">{escaped}</textarea>'
+        '</div>'
+        '<script>function copyReport(btn){'
+        'var ta=btn.parentNode.querySelector("textarea");'
+        'ta.select();ta.setSelectionRange(0,ta.value.length);'
+        'navigator.clipboard.writeText(ta.value).then(function(){'
+        'btn.textContent="Copied!";btn.classList.add("copied");'
+        'setTimeout(function(){btn.textContent="Copy";btn.classList.remove("copied");},1800);'
+        '});}</script>'
+    )
+
+
 def gen_company(D, co_name):
     items = D["by_company"].get(co_name,[])
     proj_names = list(D["projects"].keys())
@@ -473,7 +579,11 @@ def gen_company(D, co_name):
     body = (cards
             + f'<div class="row"><div class="box"><h3>Activity by Project</h3>{proj_dist}</div></div>'
             + f'<div class="section"><h2>Leaderboard</h2>{leaderboard(items, D["participants"])}</div>'
-            + f'<div class="section"><h2>Activity Feed</h2>{activity_table(items)}</div>')
+            + f'<div class="section"><h2>Activity Feed</h2>{activity_table(items)}</div>'
+            + f'<div class="section"><h2>Team Report (copy-paste)</h2>'
+            + '<p style="color:var(--muted);font-size:0.85em;margin-bottom:6px">'
+            + 'Plain-text markdown summary for emailing or pasting to your team.</p>'
+            + f'{copy_box(company_markdown_report(D, co_name, items))}</div>')
 
     return page_wrap(f"{co_name} — NumFOCUS Series", f"Activity from {co_name} participants",
                      f"company-{slug}.html", body, proj_names, co_names, D["collected_at"])
