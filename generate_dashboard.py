@@ -26,6 +26,29 @@ OUTPUT_DIR = BASE_DIR / "dashboard"
 COLORS = ["#58a6ff", "#3fb950", "#d29922", "#f85149", "#bc8cff",
           "#f778ba", "#79c0ff", "#56d364", "#e3b341", "#ffa198"]
 
+
+def project_repos(info):
+    """Return the list of repos for a project config entry.
+
+    Supports the current multi-repo schema ({"repos": [...]}) and the
+    legacy single-repo schema ({"repo": "..."}) for backward compatibility.
+    """
+    if "repos" in info:
+        return list(info["repos"])
+    if "repo" in info:
+        return [info["repo"]]
+    return []
+
+
+def repo_to_project_map(projects):
+    """Build {repo: project_name} across every repo of every project."""
+    r2p = {}
+    for name, info in projects.items():
+        for repo in project_repos(info):
+            r2p[repo] = name
+    return r2p
+
+
 # ─── Shared HTML ─────────────────────────────────────────────────────────────
 
 CSS = """
@@ -305,6 +328,42 @@ def project_matrix(by_project, project_names):
             f'<th>Total</th></tr></thead><tbody>{rows}</tbody></table>')
 
 
+def repo_matrix(items, repos):
+    """Per-repo activity breakdown for one project's repos.
+
+    One row per repo (plus a Total row), same columns as project_matrix so
+    the two read consistently. Repos with zero activity still get a row so
+    it's clear which repos are being tracked.
+    """
+    def counts(subset):
+        return (
+            sum(1 for a in subset if a["type"]=="pr" and a.get("state")=="open"),
+            sum(1 for a in subset if a["type"]=="pr" and a.get("merged")),
+            sum(1 for a in subset if a["type"]=="pr" and a.get("state")=="closed" and not a.get("merged")),
+            sum(1 for a in subset if a["type"]=="commit"),
+            sum(1 for a in subset if a["type"]=="issue"),
+            sum(1 for a in subset if a["type"]=="comment"),
+            sum(1 for a in subset if a["type"]=="review"),
+            len(subset),
+        )
+    rows = ""
+    for repo in repos:
+        sub = [a for a in items if a.get("repo","")==repo]
+        po,pm,pc,cm,iss,co,rv,tot = counts(sub)
+        rows += (f'<tr><td><a href="https://github.com/{repo}">{repo}</a></td>'
+                 f'<td>{po}</td><td>{pm}</td><td>{pc}</td><td>{cm}</td>'
+                 f'<td>{iss}</td><td>{co}</td><td>{rv}</td><td><strong>{tot}</strong></td></tr>')
+    if len(repos) > 1:
+        po,pm,pc,cm,iss,co,rv,tot = counts(items)
+        rows += (f'<tr style="border-top:2px solid var(--border)"><td><strong>Total</strong></td>'
+                 f'<td><strong>{po}</strong></td><td><strong>{pm}</strong></td><td><strong>{pc}</strong></td>'
+                 f'<td><strong>{cm}</strong></td><td><strong>{iss}</strong></td><td><strong>{co}</strong></td>'
+                 f'<td><strong>{rv}</strong></td><td><strong>{tot}</strong></td></tr>')
+    return (f'<table class="t"><thead><tr><th>Repo</th><th>PRs Open</th><th>PRs Merged</th>'
+            f'<th>PRs Closed</th><th>Commits</th><th>Issues</th><th>Comments</th><th>Reviews</th>'
+            f'<th>Total</th></tr></thead><tbody>{rows}</tbody></table>')
+
+
 def inactive_callout(activity, participants, window_days=7):
     # "Active" = authored at least one activity in the trailing window_days,
     # measured back from the current wall-clock time.
@@ -354,7 +413,7 @@ def load_data():
     summary = data.get("summary",{})
     collected_at = data.get("collected_at","?")
 
-    r2p = {v["repo"]:k for k,v in projects.items()}
+    r2p = repo_to_project_map(projects)
     by_project = defaultdict(list)
     by_company = defaultdict(list)
     for item in activity:
@@ -424,7 +483,7 @@ def gen_project(D, proj_name):
     proj_names = list(D["projects"].keys())
     co_names = list(D["companies_config"].keys())
     slug = proj_name.lower().replace(" ","-")
-    repo = D["projects"][proj_name]["repo"]
+    repos = project_repos(D["projects"][proj_name])
 
     n = len(items)
     prs = sum(1 for a in items if a["type"]=="pr")
@@ -440,9 +499,15 @@ def gen_project(D, proj_name):
         <div class="card"><div class="n">{active}</div><div class="l">Active</div></div>
     </div>'''
 
-    body = (f'<p style="color:var(--muted);text-align:center">Repo: <a href="https://github.com/{repo}">{repo}</a></p>'
+    repo_links = " · ".join(f'<a href="https://github.com/{r}">{r}</a>' for r in repos)
+    repo_label = "Repos" if len(repos) != 1 else "Repo"
+    repo_break = ""
+    if len(repos) > 1:
+        repo_break = (f'<div class="section"><h2>By Repo</h2>{repo_matrix(items, repos)}</div>')
+    body = (f'<p style="color:var(--muted);text-align:center">{repo_label}: {repo_links}</p>'
             + cards
             + f'<div class="section"><h2>Timeline</h2>{timeline(items)}</div>'
+            + repo_break
             + f'<div class="section"><h2>Leaderboard</h2>{leaderboard(items, D["participants"])}</div>'
             + f'<div class="section"><h2>Activity Feed</h2>{activity_table(items)}</div>')
 
@@ -465,7 +530,7 @@ def company_slack_report(D, co_name, items):
     and PR lines use bare URLs (Slack auto-links them) kept OUTSIDE the code
     block. No markdown tables, no *bold*, no [text](url), no <url|text>.
     """
-    r2p = {v["repo"]:k for k,v in D["projects"].items()}
+    r2p = repo_to_project_map(D["projects"])
     parts = D["participants"]
 
     n = len(items)
@@ -582,7 +647,7 @@ def gen_company(D, co_name):
     # Project distribution for this company
     co_by_proj = Counter()
     for item in items: co_by_proj[item.get("repo","")] += 1
-    r2p = {v["repo"]:k for k,v in D["projects"].items()}
+    r2p = repo_to_project_map(D["projects"])
     proj_dist = bar_chart([(r2p.get(r,r), c, None) for r,c in co_by_proj.most_common()])
 
     cards = f'''<div class="cards">
@@ -613,8 +678,9 @@ def gen_about(D):
 
     proj_rows = ""
     for name, info in D["projects"].items():
-        repo = info["repo"]
-        proj_rows += f'<tr><td>{name}</td><td><a href="https://github.com/{repo}">{repo}</a></td></tr>'
+        repos = project_repos(info)
+        links = "<br>".join(f'<a href="https://github.com/{r}">{r}</a>' for r in repos)
+        proj_rows += f'<tr><td>{name}</td><td>{links}</td></tr>'
 
     co_rows = "".join(f'<tr><td>{co}</td><td>{len(ids)}</td></tr>'
                       for co,ids in D["companies_config"].items())
@@ -662,7 +728,7 @@ def gen_about(D):
 
 def gen_summary_json(D):
     act = D["activity"]; participants = D["participants"]
-    r2p = {v["repo"]:k for k,v in D["projects"].items()}
+    r2p = repo_to_project_map(D["projects"])
     bp = Counter(); bc = Counter()
     ps = defaultdict(lambda:{"prs":0,"merged":0,"commits":0,"issues":0,"comments":0,"reviews":0,"total":0})
     for item in act:
