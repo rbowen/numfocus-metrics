@@ -120,6 +120,17 @@ pre.json{background:var(--surface);border:1px solid var(--border);border-radius:
 .copy-btn{position:absolute;top:10px;right:10px;background:var(--accent);color:#000;border:none;border-radius:6px;
   padding:6px 12px;font-size:.8em;font-weight:600;cursor:pointer}
 .copy-btn:hover{opacity:.85} .copy-btn.copied{background:var(--green)}
+details.feed-more{margin-top:10px}
+details.feed-more>summary{cursor:pointer;color:var(--accent);font-size:.85em;
+  font-weight:600;list-style:none;padding:8px 12px;background:var(--surface2);
+  border:1px solid var(--border);border-radius:6px;user-select:none;
+  display:inline-flex;align-items:center;gap:6px}
+details.feed-more>summary::-webkit-details-marker{display:none}
+details.feed-more>summary::before{content:"▶";font-size:.7em;transition:transform .15s}
+details.feed-more[open]>summary::before{transform:rotate(90deg)}
+details.feed-more>summary:hover{background:var(--border)}
+details.feed-more[open]>summary{margin-bottom:10px}
+details.feed-more>.t{margin-top:0}
 """
 
 
@@ -260,10 +271,17 @@ def timeline(activity):
 
 # ─── Table helpers ───────────────────────────────────────────────────────────
 
-def activity_table(items, limit=200):
+def activity_table(items, limit=200, head=20):
+    """Activity feed table.
+
+    Shows the ``head`` most-recent rows always-visible; any rows beyond that
+    (up to ``limit`` total) are collapsed under a <details> twisty so long
+    feeds don't run off the page. When there are <= head rows, no twisty is
+    shown. ``head=None`` disables collapsing (renders all rows flat).
+    """
     if not items: return '<p class="empty">No activity yet.</p>'
-    rows = []
-    for item in items[:limit]:
+
+    def _row(item):
         t = item["type"]
         d = (item.get("created_at") or item.get("submitted_at") or "")[:10]
         who = item.get("person_name", item.get("author","?"))
@@ -272,11 +290,30 @@ def activity_table(items, limit=200):
         url = item.get("url") or item.get("issue_url") or "#"
         bcls = {"pr":"b-pr","issue":"b-issue","comment":"b-comment","review":"b-review","commit":"b-commit"}.get(t,"")
         mg = ' <span class="merged">✓merged</span>' if item.get("merged") else ""
-        rows.append(f'<tr><td>{d}</td><td><span class="badge {bcls}">{t}</span>{mg}</td>'
-                    f'<td>{who}<span class="co">{co}</span></td>'
-                    f'<td><a href="{url}" target="_blank">{title}</a></td><td>{item.get("state","")}</td></tr>')
-    return (f'<table class="t"><thead><tr><th>Date</th><th>Type</th><th>Person</th>'
-            f'<th>Title</th><th>State</th></tr></thead><tbody>{"".join(rows)}</tbody></table>')
+        return (f'<tr><td>{d}</td><td><span class="badge {bcls}">{t}</span>{mg}</td>'
+                f'<td>{who}<span class="co">{co}</span></td>'
+                f'<td><a href="{url}" target="_blank">{title}</a></td><td>{item.get("state","")}</td></tr>')
+
+    shown = items[:limit]
+    thead = ('<thead><tr><th>Date</th><th>Type</th><th>Person</th>'
+             '<th>Title</th><th>State</th></tr></thead>')
+
+    def _table(subset):
+        return f'<table class="t">{thead}<tbody>{"".join(_row(it) for it in subset)}</tbody></table>'
+
+    # No collapsing needed.
+    if head is None or len(shown) <= head:
+        return _table(shown)
+
+    first, rest = shown[:head], shown[head:]
+    return (
+        _table(first)
+        + f'<details class="feed-more"><summary>Show {len(rest)} more '
+        + ('activities' if len(rest) != 1 else 'activity')
+        + f' ({head}–{len(shown)} of {len(shown)})</summary>'
+        + _table(rest)
+        + '</details>'
+    )
 
 
 def leaderboard(items, participants):
