@@ -40,7 +40,7 @@ SERIES_START = "2026-08-15T00:00:00Z"
 
 BASE_DIR          = Path(__file__).parent
 PARTICIPANTS_FILE  = BASE_DIR / "participants.json"
-DATA_FILE         = BASE_DIR / "data_graphql.json"
+DATA_FILE         = BASE_DIR / "data.json"
 CACHE_DIR         = BASE_DIR / ".cache"
 
 USE_CACHE = "--no-cache" not in sys.argv
