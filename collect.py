@@ -331,13 +331,14 @@ def main():
 
     all_activity = []
     for proj_name, proj_info in projects.items():
-        repo = proj_info["repo"]
-        print(f"\n📦 {proj_name} ({repo})")
-        all_activity.extend(collect_prs(repo, all_ids))
-        all_activity.extend(collect_commits(repo, all_ids))
-        all_activity.extend(collect_issues(repo, all_ids))
-        all_activity.extend(collect_issue_comments(repo, all_ids))
-        all_activity.extend(collect_pr_reviews(repo, all_ids))
+        repos = proj_info.get("repos", [proj_info["repo"]] if "repo" in proj_info else [])
+        print(f"\n📦 {proj_name} ({', '.join(repos)})")
+        for repo in repos:
+            all_activity.extend(collect_prs(repo, all_ids))
+            all_activity.extend(collect_commits(repo, all_ids))
+            all_activity.extend(collect_issues(repo, all_ids))
+            all_activity.extend(collect_issue_comments(repo, all_ids))
+            all_activity.extend(collect_pr_reviews(repo, all_ids))
 
     for item in all_activity:
         author_lower = item.get("author", "").lower()
