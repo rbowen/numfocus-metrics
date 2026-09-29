@@ -1,10 +1,10 @@
 {
   "projects": {
-    "pandas": { "repo": "pandas-dev/pandas" },
-    "NumPy": { "repo": "numpy/numpy" },
-    "SciPy": { "repo": "scipy/scipy" },
-    "Blosc": { "repo": "Blosc/python-blosc2" },
-    "Spyder": { "repo": "spyder-ide/spyder" }
+    "pandas": { "repos": ["pandas-dev/pandas"] },
+    "NumPy":  { "repos": ["numpy/numpy", "numpy/numpy-financial", "numpy/numpy.org"] },
+    "SciPy":  { "repos": ["scipy/scipy"] },
+    "Blosc":  { "repos": ["Blosc/python-blosc2", "Blosc/c-blosc2"] },
+    "Spyder": { "repos": ["spyder-ide/spyder", "spyder-ide/spyder-docs", "spyder-ide/docrepr"] }
   },
   "companies": {
     "Acme Corp": [

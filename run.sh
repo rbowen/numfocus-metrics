@@ -1,6 +1,6 @@
 #!/bin/sh
 # Collect data from GitHub and generate dashboard
-# Requires: GITHUB_TOKEN env var
+# Requires: GITHUB_TOKEN env var (or a .env file in the same directory)
 cd "$(dirname "$0")"
 
 # Ensure GITHUB_TOKEN is set
@@ -15,7 +15,12 @@ if [[ -z "$GITHUB_TOKEN" ]]; then
 fi
 
 echo "=== Collecting GitHub data ==="
-uv run --no-project python collect.py
+if [[ "$*" == *"--graphql"* ]]; then
+    echo "Using GraphQL collector"
+    uv run python collect_graphql.py "$@"
+else
+    uv run python collect.py "$@"
+fi
 if [[ $? -ne 0 ]]; then
     echo "❌ Collection failed"
     exit 1
@@ -23,7 +28,7 @@ fi
 
 echo ""
 echo "=== Generating dashboard ==="
-uv run --no-project python generate_dashboard.py
+uv run python generate_dashboard.py
 if [[ $? -ne 0 ]]; then
     echo "❌ Dashboard generation failed"
     exit 1
