@@ -52,11 +52,11 @@ unchanged responses return 304 and cost zero API quota.
 self-contained static site in `dashboard/`:
 
 - **Overview** — summary cards, daily activity timeline, charts by
-  project/company/type, top contributors, inactive participant callout,
+  project/company/type, recently merged PRs, inactive participant callout,
   project breakdown matrix
-- **Per-project pages** — timeline, leaderboard, and activity feed for
+- **Per-project pages** — timeline, participant activity, and activity feed for
   each tracked project
-- **Per-company pages** — project distribution, leaderboard, and feed
+- **Per-company pages** — project distribution, participant activity, and feed
   for each participating company
 - **Data API page** — schema docs and download links for the raw JSON
 

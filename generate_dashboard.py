@@ -316,6 +316,59 @@ def activity_table(items, limit=200, head=20):
     )
 
 
+def _ellipsize(s, n):
+    """Truncate string s to n chars, adding an ellipsis if it was cut."""
+    s = (s or "").strip()
+    return s if len(s) <= n else s[:n-1].rstrip() + "\u2026"
+
+
+def _pr_number(a):
+    """Extract a PR number: prefer a stored 'number', else parse the URL's
+    trailing /pull/<n> (or /issues/<n>) segment. Returns int or None."""
+    num = a.get("number")
+    if isinstance(num, int):
+        return num
+    if isinstance(num, str) and num.isdigit():
+        return int(num)
+    import re as _re
+    m = _re.search(r"/(?:pull|issues)/(\d+)", a.get("url","") or "")
+    return int(m.group(1)) if m else None
+
+
+def recent_merged_prs(items, participants, n=10, title_len=70):
+    """The N most-recently-merged PRs as a compact list.
+
+    Row format:  <contributor name>   [PR #123]   <ellipsized title>
+    The [PR #123] label is the link to the PR; the title is plain text,
+    truncated with an ellipsis. Sorted by created_at desc (no merged_at is
+    collected). Non-competitive replacement for the old Top-10 chart.
+    """
+    merged = [a for a in items if a.get("type")=="pr" and a.get("merged")]
+    merged.sort(key=lambda x:x.get("created_at",""), reverse=True)
+    merged = merged[:n]
+    if not merged:
+        return '<p class="empty">No merged PRs yet.</p>'
+    rows = []
+    for a in merged:
+        gh = a.get("author","").lower()
+        info = participants.get(gh, {})
+        nm = a.get("person_name") or info.get("name", a.get("author","?"))
+        co = info.get("company","?")
+        color = EMPLOYER_COLORS.get(co, EMPLOYER_FALLBACK)
+        title = _ellipsize(_clean_pr_title(a.get("title","")), title_len)
+        url = a.get("url") or "#"
+        num = _pr_number(a)
+        prlabel = f"PR #{num}" if num else "PR"
+        rows.append(
+            f'<li style="margin:0 0 8px 0;line-height:1.4">'
+            f'<span style="color:{color};font-weight:600">{nm}</span>'
+            f'<span class="co">{co}</span> '
+            f'<a href="{url}" target="_blank" style="font-family:var(--mono,monospace);'
+            f'white-space:nowrap">[{prlabel}]</a> '
+            f'<span style="color:var(--muted)">{title}</span></li>')
+    return f'<ul style="list-style:none;padding:0;margin:0">{"".join(rows)}</ul>'
+
+
 def leaderboard(items, participants):
     stats = defaultdict(lambda: {"prs":0,"merged":0,"commits":0,"issues":0,"comments":0,"reviews":0,"total":0})
     for item in items:
@@ -326,20 +379,24 @@ def leaderboard(items, participants):
         elif t=="issue": stats[a]["issues"]+=1
         elif t=="comment": stats[a]["comments"]+=1
         elif t=="review": stats[a]["reviews"]+=1
-    if not stats: return '<p class="empty">No activity yet.</p>'
+    # Participant activity table (NOT a ranked leaderboard): everyone with any
+    # activity is listed alphabetically by name, all-zero participants omitted.
+    nonzero = [(gh,s) for gh,s in stats.items() if s["total"] > 0]
+    if not nonzero: return '<p class="empty">No activity yet.</p>'
+    def _nm(gh): return participants.get(gh,{}).get("name",gh)
     rows = []
     seen = []
-    for i,(gh,s) in enumerate(sorted(stats.items(),key=lambda x:x[1]["total"],reverse=True),1):
+    for gh,s in sorted(nonzero, key=lambda x:(_nm(x[0]).lower(), x[0])):
         info = participants.get(gh,{})
         nm = info.get("name",gh); co = info.get("company","?")
         color = EMPLOYER_COLORS.get(co, EMPLOYER_FALLBACK)
         if co not in seen: seen.append(co)
-        rows.append(f'<tr><td>{i}</td><td><span style="color:{color};font-weight:600">{nm}</span>'
+        rows.append(f'<tr><td><span style="color:{color};font-weight:600">{nm}</span>'
                     f'<span class="co">{co}</span></td>'
                     f'<td>{s["prs"]}</td><td>{s["merged"]}</td><td>{s["commits"]}</td>'
                     f'<td>{s["issues"]}</td><td>{s["comments"]}</td><td>{s["reviews"]}</td>'
                     f'<td><strong>{s["total"]}</strong></td></tr>')
-    return (f'<table class="t"><thead><tr><th>#</th><th>Person</th><th>PRs</th><th>Merged</th>'
+    return (f'<table class="t"><thead><tr><th>Person</th><th>PRs</th><th>Merged</th>'
             f'<th>Commits</th><th>Issues</th><th>Comments</th><th>Reviews</th><th>Total</th>'
             f'</tr></thead><tbody>{"".join(rows)}</tbody></table>'
             + category_legend(seen, EMPLOYER_COLORS, EMPLOYER_FALLBACK))
@@ -491,12 +548,7 @@ def gen_index(D):
     co_b = bar_chart([(c, len(items), c) for c,items in co_pairs],
                      color_map=EMPLOYER_COLORS, show_legend=False)
 
-    person_totals = Counter()
-    for item in act: person_totals[item.get("author","").lower()] += 1
-    top10 = [(D["participants"].get(g,{}).get("name",g), c,
-              D["participants"].get(g,{}).get("company","Unknown"))
-             for g,c in person_totals.most_common(10)]
-    top10_b = bar_chart(top10, color_map=EMPLOYER_COLORS)
+    recent_prs_b = recent_merged_prs(act, D["participants"], n=10)
 
     charts = f'''<div class="row">
         <div class="box"><h3>Activity Types</h3>{type_d}</div>
@@ -504,7 +556,7 @@ def gen_index(D):
     </div>
     <div class="row">
         <div class="box"><h3>By Company</h3>{co_b}</div>
-        <div class="box"><h3>Top 10 Contributors</h3>{top10_b}</div>
+        <div class="box"><h3>Recently Merged PRs</h3>{recent_prs_b}</div>
     </div>'''
 
     inact = inactive_callout(act, D["participants"])
@@ -545,7 +597,7 @@ def gen_project(D, proj_name):
             + cards
             + f'<div class="section"><h2>Timeline</h2>{timeline(items)}</div>'
             + repo_break
-            + f'<div class="section"><h2>Leaderboard</h2>{leaderboard(items, D["participants"])}</div>'
+            + f'<div class="section"><h2>Participant Activity</h2>{leaderboard(items, D["participants"])}</div>'
             + f'<div class="section"><h2>Activity Feed</h2>{activity_table(items)}</div>')
 
     return page_wrap(f"{proj_name} — NumFOCUS Series", f"Project activity for {proj_name}",
@@ -612,21 +664,27 @@ def company_slack_report(D, co_name, items):
         elif t=="comment": stats[gh]["comments"]+=1
         elif t=="review": stats[gh]["reviews"]+=1
 
-    L.append("PARTICIPANT LEADERBOARD")
-    if stats:
-        ranked = sorted(stats.items(), key=lambda x:-x[1]["total"])
-        headers = ["#","Person","PRs","Merged","Commits","Issues","Comments","Reviews","Total"]
+    # Participant activity table. Deliberately NOT a ranked leaderboard: everyone
+    # is listed in alphabetical order by name (not sorted by output) so it reads
+    # as a participation summary, not a competition. Anyone whose counts are all
+    # zero is omitted.
+    L.append("PARTICIPANT ACTIVITY")
+    nonzero = [(gh,s) for gh,s in stats.items() if s["total"] > 0]
+    if nonzero:
+        # Alphabetical by display name (case-insensitive), then by handle.
+        def _name(gh): return parts.get(gh,{}).get("name",gh)
+        ordered = sorted(nonzero, key=lambda x:(_name(x[0]).lower(), x[0]))
+        headers = ["Person","PRs","Merged","Commits","Issues","Comments","Reviews","Total"]
         table_rows = []
-        for i,(gh,s) in enumerate(ranked,1):
-            nm = parts.get(gh,{}).get("name",gh)
-            table_rows.append([str(i), nm, str(s["prs"]), str(s["merged"]), str(s["commits"]),
+        for gh,s in ordered:
+            table_rows.append([_name(gh), str(s["prs"]), str(s["merged"]), str(s["commits"]),
                                str(s["issues"]), str(s["comments"]), str(s["reviews"]), str(s["total"])])
         # Column widths: person left-aligned, numeric columns right-aligned.
         widths = [max(len(headers[c]), *(len(r[c]) for r in table_rows)) for c in range(len(headers))]
         def _fmt_row(cells):
             out = []
             for c,val in enumerate(cells):
-                out.append(val.ljust(widths[c]) if c==1 else val.rjust(widths[c]))
+                out.append(val.ljust(widths[c]) if c==0 else val.rjust(widths[c]))
             return "  ".join(out)
         L.append(_fmt_row(headers))
         L.append("  ".join("-"*widths[c] for c in range(len(headers))))
@@ -734,7 +792,7 @@ def gen_company(D, co_name):
     body = (cards
             + f'<div class="row"><div class="box"><h3>Activity by Project</h3>{proj_dist}</div></div>'
             + repo_breakdown
-            + f'<div class="section"><h2>Leaderboard</h2>{leaderboard(items, D["participants"])}</div>'
+            + f'<div class="section"><h2>Participant Activity</h2>{leaderboard(items, D["participants"])}</div>'
             + f'<div class="section"><h2>Activity Feed</h2>{activity_table(items)}</div>'
             + f'<div class="section"><h2>Team Report (copy-paste)</h2>'
             + '<p style="color:var(--muted);font-size:0.85em;margin-bottom:6px">'
