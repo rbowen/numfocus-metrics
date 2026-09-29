@@ -644,11 +644,47 @@ def gen_company(D, co_name):
     commits = sum(1 for a in items if a["type"]=="commit")
     active = len(set(a.get("author","").lower() for a in items))
 
-    # Project distribution for this company
-    co_by_proj = Counter()
-    for item in items: co_by_proj[item.get("repo","")] += 1
+    # Project distribution for this company — group by PROJECT (not repo).
+    # Map each activity's repo to its project first, so a multi-repo project
+    # (e.g. Spyder -> spyder, spyder-docs, docrepr) shows as ONE bar.
     r2p = repo_to_project_map(D["projects"])
-    proj_dist = bar_chart([(r2p.get(r,r), c, None) for r,c in co_by_proj.most_common()])
+    co_by_proj = Counter()
+    for item in items:
+        co_by_proj[r2p.get(item.get("repo",""), item.get("repo",""))] += 1
+    proj_dist = bar_chart([(proj, c, None) for proj,c in co_by_proj.most_common()])
+
+    # Per-repo sub-breakdown for this company, but ONLY for multi-repo projects,
+    # grouped under each project heading. Single-repo projects are omitted here
+    # (their single bar above already tells the whole story).
+    def _company_repo_breakdown():
+        # project -> {repo: count} using this company's items
+        proj_repo = {}
+        for item in items:
+            repo = item.get("repo","")
+            proj = r2p.get(repo, repo)
+            proj_repo.setdefault(proj, Counter())[repo] += 1
+        blocks = []
+        # order projects by total activity desc, matching the bar chart
+        for proj, _ in co_by_proj.most_common():
+            cfg = D["projects"].get(proj)
+            repos = project_repos(cfg) if cfg else []
+            if len(repos) <= 1:
+                continue  # single-repo project: nothing extra to show
+            counts = proj_repo.get(proj, Counter())
+            # include every configured repo (even zero-activity ones)
+            triples = [(r, counts.get(r,0), None) for r in repos]
+            blocks.append(
+                f'<div class="box" style="margin-bottom:12px">'
+                f'<h3 style="margin-bottom:8px">{proj} <span style="color:var(--muted);'
+                f'font-weight:400;font-size:0.85em">by repo</span></h3>'
+                f'{bar_chart(triples)}</div>')
+        if not blocks:
+            return ""
+        return ('<div class="section"><h2>Activity by Repo '
+                '<span style="color:var(--muted);font-weight:400;font-size:0.7em">'
+                '(multi-repo projects)</span></h2>'
+                + "".join(blocks) + '</div>')
+    repo_breakdown = _company_repo_breakdown()
 
     cards = f'''<div class="cards">
         <div class="card"><div class="n">{n}</div><div class="l">Activities</div></div>
@@ -660,6 +696,7 @@ def gen_company(D, co_name):
 
     body = (cards
             + f'<div class="row"><div class="box"><h3>Activity by Project</h3>{proj_dist}</div></div>'
+            + repo_breakdown
             + f'<div class="section"><h2>Leaderboard</h2>{leaderboard(items, D["participants"])}</div>'
             + f'<div class="section"><h2>Activity Feed</h2>{activity_table(items)}</div>'
             + f'<div class="section"><h2>Team Report (copy-paste)</h2>'
